@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Users, Play, RotateCcw, Save, Upload, FileJson, 
   ChevronLeft, ChevronRight, BarChart2, Video, 
-  Eraser, Download, PieChart, Activity, AlertTriangle, Plus, Trash2, FileText, Zap, Dna, ClipboardList, Printer, Pencil, X, FolderHeart, RefreshCw, CheckCircle, Lock, ScrollText, LogOut
+  Eraser, Download, PieChart, Activity, AlertTriangle, Plus, Trash2, FileText, Zap, Dna, ClipboardList, Printer, Pencil, X, FolderHeart, RefreshCw, CheckCircle, Lock, ScrollText, LogOut, UserCircle
 } from 'lucide-react';
 import VideoPlayer from './components/VideoPlayer';
 import CourtMap from './components/CourtMap';
@@ -10,7 +10,7 @@ import {
   Team, Player, MatchMetadata, Lineup, TagEvent, 
   Zone, SkillType, ResultType, PlayerRole, TeamSide, 
   Coordinate, GradeType, SkillSubType 
-} from './types';
+} from '../types';
 
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, User } from './firebase';
 
@@ -768,9 +768,9 @@ const StatsDashboard = ({ metadata, events, onClose, currentScore }: any) => {
     );
 };
 
-const STORAGE_KEY = 'volleyTagData_Base2'; 
+export const STORAGE_KEY = 'volleyTagData_Base2'; 
 
-const VolleyTagApp: React.FC<{ onResetApp: () => void, user: User, onLogout: () => void }> = ({ onResetApp, user, onLogout }) => {
+export const VolleyTagApp: React.FC<{ onResetApp: () => void, user: User, onLogout: () => void }> = ({ onResetApp, user, onLogout }) => {
   const [phase, setPhase] = useState<'setup' | 'lineup' | 'recording' | 'stats'>('setup');
   
   // State
@@ -1503,7 +1503,6 @@ const VolleyTagApp: React.FC<{ onResetApp: () => void, user: User, onLogout: () 
       </header>
 
       <main className="flex-1 flex overflow-hidden">
-        {/* SETUP & LINEUP PHASES UNCHANGED ... */}
         {/* SETUP PHASE */}
         {phase === 'setup' && (
              <div className="w-full h-full flex items-start justify-center p-4 md:p-6 overflow-y-auto mt-4 mb-12">
@@ -2069,7 +2068,11 @@ const App = () => {
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-            setUser(currentUser);
+            if (currentUser) {
+                setUser(currentUser);
+            } else {
+                setUser(prev => (prev?.uid.startsWith('guest-') ? prev : null));
+            }
             setLoading(false);
         });
         return () => unsubscribe();
@@ -2081,15 +2084,42 @@ const App = () => {
             await signInWithPopup(auth, googleProvider);
         } catch (error) {
             console.error("Login failed", error);
-            alert("登入失敗，請確認您的網路連線或稍後再試。");
         } finally {
             setIsLoggingIn(false);
         }
     };
 
+    const handleGuestLogin = () => {
+        const guestUser = {
+            uid: 'guest-' + Date.now(),
+            displayName: '訪客教練',
+            email: 'guest@volleytag.pro',
+            photoURL: '',
+            emailVerified: true,
+            isAnonymous: true,
+            metadata: {},
+            providerData: [],
+            refreshToken: '',
+            tenantId: null,
+            delete: async () => {},
+            getIdToken: async () => '',
+            getIdTokenResult: async () => ({} as any),
+            reload: async () => {},
+            toJSON: () => ({}),
+            phoneNumber: null,
+            providerId: 'guest',
+        } as unknown as User;
+        setUser(guestUser);
+    };
+
     const handleLogout = async () => {
         try {
-            await signOut(auth);
+            if (user?.uid?.startsWith('guest-')) {
+                setUser(null);
+            } else {
+                await signOut(auth);
+                setUser(null);
+            }
         } catch (error) {
             console.error("Logout failed", error);
         }
@@ -2123,7 +2153,7 @@ const App = () => {
                     <button 
                         onClick={handleLogin} 
                         disabled={isLoggingIn}
-                        className={`w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl flex items-center justify-center gap-3 transition-all ${isLoggingIn ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105 hover:shadow-lg hover:shadow-blue-500/20'}`}
+                        className={`w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl flex items-center justify-center gap-3 transition-all mb-4 ${isLoggingIn ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105 hover:shadow-lg hover:shadow-blue-500/20'}`}
                     >
                         {isLoggingIn ? (
                             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
@@ -2136,6 +2166,14 @@ const App = () => {
                             </svg>
                         )}
                         {isLoggingIn ? '登入中...' : '使用 Google 帳號登入'}
+                    </button>
+
+                    <button 
+                        onClick={handleGuestLogin} 
+                        className="w-full bg-slate-700 hover:bg-slate-600 text-slate-300 font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-3 transition-all hover:text-white"
+                    >
+                        <UserCircle size={24} />
+                        訪客試用 (無需登入)
                     </button>
                     
                     <p className="mt-6 text-xs text-slate-500">

@@ -1,6 +1,5 @@
-
 import React, { useRef, useState } from 'react';
-import { Zone, Coordinate, ResultType, SkillType } from '../types';
+import { Zone, Coordinate, ResultType, SkillType } from '../../types';
 
 interface TrajectoryData {
   start: Coordinate;
@@ -15,7 +14,7 @@ interface CourtMapProps {
   onCoordinateSelect?: (coord: Coordinate) => void;
   onTrajectorySelect?: (start: Coordinate, end: Coordinate) => void;
   onStartPointChange?: (coord: Coordinate) => void;
-  onEndPointChange?: (coord: Coordinate) => void; // New: Allow dragging end point
+  onEndPointChange?: (coord: Coordinate) => void; 
   colorClass?: string;
   compact?: boolean;
   heatmapPoints?: (Coordinate & { result?: ResultType })[];
@@ -38,13 +37,16 @@ const CourtMap: React.FC<CourtMapProps> = ({
   const [isDraggingStart, setIsDraggingStart] = useState(false);
   const [isDraggingEnd, setIsDraggingEnd] = useState(false);
   const [mousePos, setMousePos] = useState<Coordinate | null>(null);
+  
+  // Ref to store the offset between mouse click position and the actual center of the object
+  const dragOffsetRef = useRef<{x: number, y: number}>({ x: 0, y: 0 });
 
   const getPercentage = (e: React.MouseEvent | MouseEvent) => {
       if (!containerRef.current) return { x: 0, y: 0 };
       const rect = containerRef.current.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * 100;
       const y = ((e.clientY - rect.top) / rect.height) * 100;
-      return { x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) };
+      return { x, y }; // Allow values outside 0-100 during drag for smooth experience, clamp later if needed
   };
 
   // --- Handlers for dragging the Start Point ---
@@ -53,10 +55,22 @@ const CourtMap: React.FC<CourtMapProps> = ({
       e.stopPropagation(); 
       e.preventDefault();
 
+      const clickPos = getPercentage(e);
+      // Calculate offset: Mouse Position - Ball Position
+      dragOffsetRef.current = {
+          x: clickPos.x - startPoint.x,
+          y: clickPos.y - startPoint.y
+      };
+
       setIsDraggingStart(true);
 
       const handleWindowMouseMove = (moveEvent: MouseEvent) => {
-          const newPos = getPercentage(moveEvent);
+          const mouseP = getPercentage(moveEvent);
+          // Apply offset to keep the ball under the mouse exactly where it was grabbed
+          const newPos = {
+              x: Math.max(0, Math.min(100, mouseP.x - dragOffsetRef.current.x)),
+              y: Math.max(0, Math.min(100, mouseP.y - dragOffsetRef.current.y))
+          };
           onStartPointChange(newPos); 
       };
 
@@ -76,10 +90,20 @@ const CourtMap: React.FC<CourtMapProps> = ({
       e.stopPropagation(); 
       e.preventDefault();
 
+      const clickPos = getPercentage(e);
+      dragOffsetRef.current = {
+          x: clickPos.x - pendingTrajectory.end.x,
+          y: clickPos.y - pendingTrajectory.end.y
+      };
+
       setIsDraggingEnd(true);
 
       const handleWindowMouseMove = (moveEvent: MouseEvent) => {
-          const newPos = getPercentage(moveEvent);
+          const mouseP = getPercentage(moveEvent);
+          const newPos = {
+              x: Math.max(0, Math.min(100, mouseP.x - dragOffsetRef.current.x)),
+              y: Math.max(0, Math.min(100, mouseP.y - dragOffsetRef.current.y))
+          };
           onEndPointChange(newPos); 
       };
 
@@ -98,7 +122,12 @@ const CourtMap: React.FC<CourtMapProps> = ({
       // If dragging, ignore click
       if (isDraggingStart || isDraggingEnd) return;
 
-      const clickPos = getPercentage(e);
+      // Clamp click values to 0-100 for safety
+      const rawPos = getPercentage(e);
+      const clickPos = {
+          x: Math.max(0, Math.min(100, rawPos.x)),
+          y: Math.max(0, Math.min(100, rawPos.y))
+      };
 
       // If we have a start point and in trajectory mode, this click sets (or moves) the end point
       if (trajectoryMode && startPoint && onTrajectorySelect) {
@@ -176,6 +205,16 @@ const CourtMap: React.FC<CourtMapProps> = ({
                 </>
             )}
 
+            {/* 3-Meter Zone (Front Court) Darkening - Realistic Court Effect */}
+            {/* Using a darker orange overlay to simulate different wood staining */}
+            {isNetCenter ? (
+                <div className="absolute top-[33.33%] bottom-[33.33%] w-full bg-orange-900/10 pointer-events-none z-0"></div>
+            ) : isNetTop ? (
+                <div className="absolute top-0 h-[33.33%] w-full bg-orange-900/10 pointer-events-none z-0"></div>
+            ) : (
+                <div className="absolute bottom-0 h-[33.33%] w-full bg-orange-900/10 pointer-events-none z-0"></div>
+            )}
+
             {/* Grid Lines */}
             <div className="absolute inset-0 pointer-events-none opacity-30 z-0">
                 {isNetCenter ? (
@@ -200,7 +239,7 @@ const CourtMap: React.FC<CourtMapProps> = ({
              </div>
         )}
 
-        {/* SVG Layer */}
+        {/* SVG Layer for Trajectories and Interactive Elements */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible z-20">
             <defs>
                 <marker id="arrowhead-ghost" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -225,30 +264,39 @@ const CourtMap: React.FC<CourtMapProps> = ({
 
             {/* Smart Start Point Visualizer (Draggable Ball) */}
             {startPoint && (
-                <g 
-                    className="cursor-move pointer-events-auto" 
-                    onMouseDown={handleStartDotMouseDown}
+                // Use a nested SVG positioned at the startPoint percentage.
+                // This ensures exact alignment with the logic that uses percentages.
+                <svg 
+                    x={`${startPoint.x}%`} 
+                    y={`${startPoint.y}%`} 
+                    className="overflow-visible pointer-events-auto"
                 >
-                    {/* Invisible larger hit area for easier grabbing */}
-                    <circle 
-                        cx={`${startPoint.x}%`} 
-                        cy={`${startPoint.y}%`} 
-                        r="25" 
-                        fill="transparent"
-                    />
-                    {/* Volleyball Icon (Emoji) */}
-                    <text 
-                        x={`${startPoint.x}%`} 
-                        y={`${startPoint.y}%`} 
-                        fontSize="24" 
-                        textAnchor="middle" 
-                        dominantBaseline="middle"
-                        className={`select-none ${isDraggingStart ? "scale-125 transition-transform" : "animate-pulse"}`}
-                        style={{ filter: 'drop-shadow(0px 2px 2px rgba(0,0,0,0.3))' }}
+                    <g 
+                        className={`cursor-move ${isDraggingStart ? "scale-110" : "hover:scale-105"} transition-transform duration-100 ease-out`} 
+                        onMouseDown={handleStartDotMouseDown}
                     >
-                        🏐
-                    </text>
-                </g>
+                         {/* Invisible larger hit area for easier grabbing (60px diameter) */}
+                        <circle cx="0" cy="0" r="30" fill="transparent" />
+                        
+                        {/* Custom Vector Volleyball (Mikasa Style - Blue/Yellow) */}
+                        {/* Drawn centered at 0,0 */}
+                        <g style={{ filter: 'drop-shadow(0px 4px 3px rgba(0,0,0,0.4))' }}>
+                            {/* Base Ball (Yellow) */}
+                            <circle cx="0" cy="0" r="14" fill="#facc15" stroke="#ca8a04" strokeWidth="1" />
+                            
+                            {/* Blue Panels - Simplified swirls */}
+                            <path d="M-13,-5 Q0,-14 13,-5 L13,5 Q0,-4 -13,5 Z" fill="#1d4ed8" />
+                            <path d="M-5,13 Q-14,0 -5,-13 L5,-13 Q-4,0 5,13 Z" fill="#1d4ed8" transform="rotate(90)" />
+                            
+                            {/* Panel Lines */}
+                            <path d="M-14,0 Q0,-12 14,0" fill="none" stroke="#ca8a04" strokeWidth="1" opacity="0.5" />
+                            <path d="M0,-14 Q12,0 0,14" fill="none" stroke="#ca8a04" strokeWidth="1" opacity="0.5" />
+                            
+                            {/* Gloss Effect */}
+                            <circle cx="-5" cy="-5" r="6" fill="white" opacity="0.2" />
+                        </g>
+                    </g>
+                </svg>
             )}
 
             {/* Ghost Line (Hover Preview) */}
@@ -295,22 +343,27 @@ const CourtMap: React.FC<CourtMapProps> = ({
                     />
                     
                     {/* Draggable End Point */}
-                    <g 
-                        className="cursor-move pointer-events-auto" 
-                        onMouseDown={handleEndDotMouseDown}
+                    <svg 
+                        x={`${pendingTrajectory.end.x}%`} 
+                        y={`${pendingTrajectory.end.y}%`} 
+                        className="overflow-visible pointer-events-auto"
                     >
-                        <circle cx={`${pendingTrajectory.end.x}%`} cy={`${pendingTrajectory.end.y}%`} r="25" fill="transparent" />
-                        <circle 
-                            cx={`${pendingTrajectory.end.x}%`} 
-                            cy={`${pendingTrajectory.end.y}%`} 
-                            r="6" 
-                            fill="#ef4444" 
-                            stroke="white" 
-                            strokeWidth="2" 
-                            className={isDraggingEnd ? "scale-125 transition-transform" : ""}
-                        />
-                        <circle cx={`${pendingTrajectory.end.x}%`} cy={`${pendingTrajectory.end.y}%`} r="12" fill="none" stroke="#ef4444" strokeWidth="1" opacity="0.5" />
-                    </g>
+                        <g 
+                            className="cursor-move" 
+                            onMouseDown={handleEndDotMouseDown}
+                        >
+                            <circle cx="0" cy="0" r="25" fill="transparent" />
+                            <circle 
+                                cx="0" cy="0"
+                                r="6" 
+                                fill="#ef4444" 
+                                stroke="white" 
+                                strokeWidth="2" 
+                                className={isDraggingEnd ? "scale-125 transition-transform" : ""}
+                            />
+                            <circle cx="0" cy="0" r="12" fill="none" stroke="#ef4444" strokeWidth="1" opacity="0.5" />
+                        </g>
+                    </svg>
                 </g>
             )}
         </svg>

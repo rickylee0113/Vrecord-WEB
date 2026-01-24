@@ -1,6 +1,5 @@
-
 import React, { useRef, useEffect, useState } from 'react';
-import { Upload, Play, Pause, Rewind, FastForward, Clock, FolderOpen, SkipBack, SkipForward } from 'lucide-react';
+import { Upload, Play, Pause, Rewind, FastForward, Clock, FolderOpen, SkipBack, SkipForward, Maximize, Minimize } from 'lucide-react';
 
 interface VideoPlayerProps {
   onTimeUpdate: (time: number) => void;
@@ -23,6 +22,45 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onTimeUpdate, videoRef }) => 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  // Mouse Wheel Handler for Frame-by-Frame scrubbing
+  useEffect(() => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const handleWheel = (e: WheelEvent) => {
+          // Prevent page scrolling when hovering over video
+          e.preventDefault();
+          
+          if (videoRef.current) {
+              const vidDuration = videoRef.current.duration;
+              // Avoid calculations if duration is not ready (NaN or Infinity)
+              if (isNaN(vidDuration) || !isFinite(vidDuration)) return;
+
+              // Auto-pause on scroll
+              if (!videoRef.current.paused) {
+                  videoRef.current.pause();
+                  setIsPlaying(false);
+              }
+
+              // Scroll Down (deltaY > 0) -> Forward 0.01s
+              // Scroll Up (deltaY < 0) -> Backward 0.01s
+              const delta = e.deltaY > 0 ? 0.01 : -0.01;
+              const newTime = Math.max(0, Math.min(vidDuration, videoRef.current.currentTime + delta));
+              
+              videoRef.current.currentTime = newTime;
+              setCurrentTime(newTime);
+              onTimeUpdate(newTime); // Force update to parent
+          }
+      };
+
+      // Add event listener with passive: false to allow preventDefault
+      container.addEventListener('wheel', handleWheel, { passive: false });
+
+      return () => {
+          container.removeEventListener('wheel', handleWheel);
+      };
+  }, [videoRef, onTimeUpdate, videoSrc]); // Re-attach when video source changes
 
   const resetPlayerState = () => {
       setCurrentTime(0);
@@ -72,7 +110,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onTimeUpdate, videoRef }) => 
 
   const skip = (seconds: number) => {
     if (videoRef.current) {
-      videoRef.current.currentTime += seconds;
+      // Auto-pause on skip button press
+      videoRef.current.pause();
+      setIsPlaying(false);
+
+      const vidDuration = videoRef.current.duration || 0;
+      const newTime = Math.max(0, Math.min(vidDuration, videoRef.current.currentTime + seconds));
+      
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+      onTimeUpdate(newTime);
     }
   };
 
@@ -100,7 +147,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onTimeUpdate, videoRef }) => 
   const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    const centiseconds = Math.floor((time % 1) * 100);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
+  };
+
+  const toggleFullscreen = () => {
+      if (!containerRef.current) return;
+      if (!document.fullscreenElement) {
+          containerRef.current.requestFullscreen().catch(err => console.log("Fullscreen error", err));
+      } else {
+          document.exitFullscreen().catch(err => console.log("Exit Fullscreen error", err));
+      }
   };
 
   useEffect(() => {
@@ -190,11 +247,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onTimeUpdate, videoRef }) => 
         {isFullscreen && (
             <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 via-black/40 to-transparent z-50 flex flex-col justify-end">
                <div className="flex items-center gap-4 text-white drop-shadow-md">
-                  <span className="text-lg font-mono font-bold">{formatTime(currentTime)}</span>
+                  <span className="text-lg font-mono font-bold w-24">{formatTime(currentTime)}</span>
                   <input 
                       type="range" 
                       min="0" 
                       max={duration || 100} 
+                      step="0.01" 
                       value={currentTime}
                       onChange={(e) => {
                           const val = Number(e.target.value);
@@ -203,7 +261,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onTimeUpdate, videoRef }) => 
                       }}
                       className="flex-1 h-4 bg-white/30 rounded-full appearance-none cursor-pointer accent-blue-500 hover:bg-white/50 transition-all"
                   />
-                  <span className="text-lg font-mono font-bold">{formatTime(duration)}</span>
+                  <span className="text-lg font-mono font-bold w-24 text-right">{formatTime(duration)}</span>
                </div>
             </div>
         )}
@@ -211,11 +269,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onTimeUpdate, videoRef }) => 
 
       <div className="bg-slate-800 p-4 border-t border-slate-700">
         <div className="flex items-center gap-3 text-xs text-slate-400 mb-3">
-            <span>{formatTime(currentTime)}</span>
+            <span className="font-mono w-16 text-right">{formatTime(currentTime)}</span>
             <input 
                 type="range" 
                 min="0" 
                 max={duration || 100} 
+                step="0.01"
                 value={currentTime}
                 onChange={(e) => {
                     const val = Number(e.target.value);
@@ -224,7 +283,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onTimeUpdate, videoRef }) => 
                 }}
                 className="flex-1 h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
             />
-            <span>{formatTime(duration)}</span>
+            <span className="font-mono w-16">{formatTime(duration)}</span>
         </div>
 
         <div className="flex items-center justify-between flex-wrap gap-y-2">
@@ -297,7 +356,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onTimeUpdate, videoRef }) => 
                         </button>
                     ))}
                 </div>
+                
                 <div className="w-px h-8 bg-slate-700 mx-1"></div>
+
+                {/* Fullscreen Button with Hint */}
+                <button 
+                    onClick={toggleFullscreen}
+                    className="flex flex-col items-center justify-center p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors group"
+                    title="按住 Z 全螢幕 (Hold Z)"
+                >
+                    {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+                    <span className="text-[9px] group-hover:text-blue-300 transition-colors">全螢幕(Z)</span>
+                </button>
+
                 <button 
                     onClick={() => {
                         setVideoSrc(null);
